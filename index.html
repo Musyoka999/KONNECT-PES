@@ -3,44 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vee Pro - Secure Tracker</title>
+    <title>Vee Pro - Satellite Detail</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --primary: #007bff; --danger: #dc3545; }
-        body { margin: 0; font-family: sans-serif; background: #eee; }
+        body { margin: 0; font-family: sans-serif; background: #222; }
         #map { height: 100vh; width: 100%; z-index: 1; }
 
+        /* Modern Login Box */
         .modal {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             z-index: 2000; background: white; padding: 25px; border-radius: 15px;
-            box-shadow: 0 5px 25px rgba(0,0,0,0.2); width: 85%; max-width: 320px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5); width: 85%; max-width: 320px;
         }
         input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
         button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .btn-main { background: var(--primary); color: white; }
+        .btn-main { background: var(--primary); color: white; margin-top: 10px; }
         .btn-panic { background: var(--danger); color: white; margin-top: 10px; }
 
+        /* Floating Dashboard */
         #ui-overlay {
-            position: absolute; top: 10px; left: 10px; z-index: 1000;
-            background: white; padding: 10px; border-radius: 8px; display: none;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: absolute; top: 15px; left: 15px; z-index: 1000;
+            background: rgba(255,255,255,0.9); padding: 15px; border-radius: 12px;
+            display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
         }
     </style>
 </head>
 <body>
 
     <div id="login-screen" class="modal">
-        <h2 style="text-align:center">Vee Pro</h2>
-        <input type="text" id="roomInput" placeholder="Room Name">
+        <h2 style="text-align:center; margin-top:0;">Vee Pro</h2>
+        <p style="font-size: 0.8em; color: #666; text-align:center;">Enter matching details to see each other.</p>
+        <input type="text" id="roomInput" placeholder="Room Name (e.g. MyHome)">
         <input type="password" id="passInput" placeholder="Password">
         <input type="text" id="nameInput" placeholder="Your Name">
-        <button class="btn-main" onclick="startVee()">Start Tracking</button>
+        <button class="btn-main" onclick="startVee()">Connect to Satellites</button>
     </div>
 
     <div id="ui-overlay">
-        <b>Room:</b> <span id="room-display"></span><br>
-        <button class="btn-panic" onclick="panicStop()">PANIC: WIPE ME</button>
+        <div style="margin-bottom: 5px;"><b>Room:</b> <span id="room-display"></span></div>
+        <div id="status" style="font-size: 0.75em; color: #28a745; margin-bottom: 10px;">● Signal: High Precision</div>
+        <button class="btn-panic" onclick="panicStop()">PANIC: WIPE & EXIT</button>
     </div>
 
     <div id="map"></div>
@@ -50,50 +54,71 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-        // 1. REPLACE THIS with your actual Firebase URL
-        const firebaseConfig = { databaseURL: "https://vee-tracker-47c73-default-rtdb.firebaseio.com/" };
+        // !!! IMPORTANT: Paste your Firebase URL below !!!
+        const firebaseConfig = { 
+            databaseURL: "https://vee-tracker-47c73-default-rtdb.firebaseio.com/" 
+        };
         
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
         let map, watchId, myName, secretPath;
         let markers = {};
 
-        // Initialize Map globally
-        map = L.map('map').setView([0, 0], 2);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        // Initialize Map with deep zoom capability
+        map = L.map('map', { 
+            maxZoom: 20,
+            zoomControl: false // Cleaner look for mobile
+        }).setView([0, 0], 2);
+
+        // Add Satellite Layer (Esri World Imagery)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 20,
+            attribution: 'Esri, Maxar, Earthstar Geographics'
+        }).addTo(map);
+
+        // Add a transparent Label layer so you can still see street names
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+            pane: 'shadowPane', // Keeps labels above the satellite image
+            opacity: 0.8
+        }).addTo(map);
 
         window.startVee = function() {
             const room = document.getElementById('roomInput').value;
             const pass = document.getElementById('passInput').value;
             myName = document.getElementById('nameInput').value || "User";
 
-            if(!room || !pass) return alert("Missing Room or Password!");
+            if(!room || !pass) return alert("Room and Password required!");
 
             secretPath = `rooms/${room}_${pass}`;
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('ui-overlay').style.display = 'block';
             document.getElementById('room-display').innerText = room;
 
-            // Start GPS tracking
             if ("geolocation" in navigator) {
+                // 'watchPosition' updates the server every time the person moves
                 watchId = navigator.geolocation.watchPosition((pos) => {
                     const { latitude, longitude } = pos.coords;
                     
-                    // Update Server
+                    // Update Firebase
                     set(ref(db, `${secretPath}/${myName}`), {
                         lat: latitude,
                         lng: longitude,
                         time: Date.now()
                     });
 
-                    // Zoom to me the first time
-                    if (!markers[myName]) map.flyTo([latitude, longitude], 17);
+                    // Punch-zoom to the apartment level (Zoom 19)
+                    if (!markers[myName]) {
+                        map.flyTo([latitude, longitude], 19);
+                    }
                 }, (err) => {
-                    alert("GPS Error: " + err.message + ". Make sure you are using HTTPS.");
-                }, { enableHighAccuracy: true });
+                    alert("GPS Blocked! Check browser permissions and use HTTPS.");
+                }, { 
+                    enableHighAccuracy: true,
+                    maximumAge: 0 
+                });
             }
 
-            // Sync with Friends
+            // Real-time Sync: Listen for you and your friend
             onValue(ref(db, secretPath), (snapshot) => {
                 const data = snapshot.val();
                 for (let id in data) {
@@ -101,7 +126,14 @@
                     if (markers[id]) {
                         markers[id].setLatLng([lat, lng]);
                     } else {
-                        markers[id] = L.marker([lat, lng]).addTo(map).bindPopup(id).openPopup();
+                        // Custom Marker
+                        const icon = L.divIcon({
+                            className: 'custom-div-icon',
+                            html: `<div style="background-color:${id === myName ? '#007bff' : '#ff4500'}; width:12px; height:12px; border:2px solid white; border-radius:50%; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>`,
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6]
+                        });
+                        markers[id] = L.marker([lat, lng], {icon: icon}).addTo(map).bindPopup(id).openPopup();
                     }
                 }
             });
@@ -110,10 +142,10 @@
         window.panicStop = function() {
             if (watchId) navigator.geolocation.clearWatch(watchId);
             remove(ref(db, `${secretPath}/${myName}`)).then(() => {
-                alert("Data Wiped.");
+                alert("Location Wiped and Securely Exited.");
                 location.reload();
             });
         };
     </script>
 </body>
-                         </html>
+</html>
