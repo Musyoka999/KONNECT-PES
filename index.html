@@ -3,48 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vee Pro - Satellite Detail</title>
+    <title>Vee Pro - Perfect Deep Zoom</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        :root { --primary: #007bff; --danger: #dc3545; }
-        body { margin: 0; font-family: sans-serif; background: #222; }
-        #map { height: 100vh; width: 100%; z-index: 1; }
+        :root { --red: #ff0000; --blue: #007bff; --panic: #dc3545; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #000; }
+        #map { height: 100vh; width: 100%; z-index: 1; background: #000; }
 
-        /* Modern Login Box */
+        /* Login Modal */
         .modal {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 2000; background: white; padding: 25px; border-radius: 15px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5); width: 85%; max-width: 320px;
+            z-index: 2000; background: white; padding: 25px; border-radius: 20px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.8); width: 85%; max-width: 320px; color: #333;
         }
-        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .btn-main { background: var(--primary); color: white; margin-top: 10px; }
-        .btn-panic { background: var(--danger); color: white; margin-top: 10px; }
+        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; font-size: 16px; }
+        button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.2s; }
+        .btn-main { background: #000; color: white; }
+        .btn-panic { background: var(--panic); color: white; margin-top: 10px; }
 
-        /* Floating Dashboard */
+        /* HUD Overlay */
         #ui-overlay {
             position: absolute; top: 15px; left: 15px; z-index: 1000;
-            background: rgba(255,255,255,0.9); padding: 15px; border-radius: 12px;
-            display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(10px); padding: 15px; 
+            border-radius: 15px; display: none; border: 1px solid #333; color: white;
+        }
+
+        /* Floating Name Labels */
+        .name-tag {
+            background: rgba(255, 255, 255, 0.9); color: black; border: 1px solid black;
+            padding: 2px 8px; border-radius: 5px; font-weight: bold; font-size: 11px;
+            white-space: nowrap; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
         }
     </style>
 </head>
 <body>
 
     <div id="login-screen" class="modal">
-        <h2 style="text-align:center; margin-top:0;">Vee Pro</h2>
-        <p style="font-size: 0.8em; color: #666; text-align:center;">Enter matching details to see each other.</p>
-        <input type="text" id="roomInput" placeholder="Room Name (e.g. MyHome)">
+        <h2 style="text-align:center; margin-top:0;">VEE PRO</h2>
+        <input type="text" id="roomInput" placeholder="Room ID">
         <input type="password" id="passInput" placeholder="Password">
         <input type="text" id="nameInput" placeholder="Your Name">
-        <button class="btn-main" onclick="startVee()">Connect to Satellites</button>
+        <button class="btn-main" onclick="startVee()">ACTIVATE TRACKING</button>
     </div>
 
     <div id="ui-overlay">
-        <div style="margin-bottom: 5px;"><b>Room:</b> <span id="room-display"></span></div>
-        <div id="status" style="font-size: 0.75em; color: #28a745; margin-bottom: 10px;">● Signal: High Precision</div>
-        <button class="btn-panic" onclick="panicStop()">PANIC: WIPE & EXIT</button>
+        <div style="font-size: 1.1em; margin-bottom: 5px;">📍 <span id="room-display"></span></div>
+        <div id="active-count" style="font-size: 0.8em; color: #aaa; margin-bottom: 10px;">Searching for signal...</div>
+        <button class="btn-panic" onclick="panicStop()">PANIC & WIPE</button>
     </div>
 
     <div id="map"></div>
@@ -54,32 +60,26 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-        // !!! IMPORTANT: Paste your Firebase URL below !!!
-        const firebaseConfig = { 
-            databaseURL: "https://vee-tracker-47c73-default-rtdb.firebaseio.com/" 
-        };
+        // 1. ADD YOUR FIREBASE LINK HERE
+        const firebaseConfig = { databaseURL: "https://vee-tracker-47c73-default-rtdb.firebaseio.com/" };
         
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
         let map, watchId, myName, secretPath;
         let markers = {};
+        let tags = {};
 
-        // Initialize Map with deep zoom capability
+        // 2. Initialize Map with GOOGLE HYBRID (Best Deep Zoom)
         map = L.map('map', { 
-            maxZoom: 20,
-            zoomControl: false // Cleaner look for mobile
+            maxZoom: 21, // Higher zoom than before
+            zoomControl: false 
         }).setView([0, 0], 2);
-
-        // Add Satellite Layer (Esri World Imagery)
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 20,
-            attribution: 'Esri, Maxar, Earthstar Geographics'
-        }).addTo(map);
-
-        // Add a transparent Label layer so you can still see street names
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
-            pane: 'shadowPane', // Keeps labels above the satellite image
-            opacity: 0.8
+        
+        // Google Hybrid: Satellite + Streets + Place Names
+        L.tileLayer('https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
+            maxZoom: 21,
+            subdomains:['mt0','mt1','mt2','mt3'],
+            attribution: '© Google Satellites'
         }).addTo(map);
 
         window.startVee = function() {
@@ -87,53 +87,56 @@
             const pass = document.getElementById('passInput').value;
             myName = document.getElementById('nameInput').value || "User";
 
-            if(!room || !pass) return alert("Room and Password required!");
+            if(!room || !pass) return alert("Security Error: Room/Pass Required");
 
             secretPath = `rooms/${room}_${pass}`;
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('ui-overlay').style.display = 'block';
-            document.getElementById('room-display').innerText = room;
+            document.getElementById('room-display').innerText = room.toUpperCase();
 
-            if ("geolocation" in navigator) {
-                // 'watchPosition' updates the server every time the person moves
+            if (navigator.geolocation) {
                 watchId = navigator.geolocation.watchPosition((pos) => {
                     const { latitude, longitude } = pos.coords;
-                    
-                    // Update Firebase
                     set(ref(db, `${secretPath}/${myName}`), {
-                        lat: latitude,
-                        lng: longitude,
-                        time: Date.now()
+                        lat: latitude, lng: longitude, time: Date.now()
                     });
-
-                    // Punch-zoom to the apartment level (Zoom 19)
-                    if (!markers[myName]) {
-                        map.flyTo([latitude, longitude], 19);
-                    }
-                }, (err) => {
-                    alert("GPS Blocked! Check browser permissions and use HTTPS.");
-                }, { 
-                    enableHighAccuracy: true,
-                    maximumAge: 0 
-                });
+                    // Perfect Zoom Level (20 is very deep)
+                    if (!markers[myName]) map.flyTo([latitude, longitude], 20);
+                }, (e) => alert("GPS Error: Use HTTPS/Check settings"), { enableHighAccuracy: true });
             }
 
-            // Real-time Sync: Listen for you and your friend
             onValue(ref(db, secretPath), (snapshot) => {
                 const data = snapshot.val();
+                if (!data) return;
+                
+                document.getElementById('active-count').innerText = `LIVE: ${Object.keys(data).length} Active`;
+
                 for (let id in data) {
-                    const { lat, lng } = data[id];
+                    const { lat, lng, time } = data[id];
+                    const isMe = (id === myName);
+                    const color = isMe ? '#ff0000' : '#007bff'; // YOU = RED, OTHER = BLUE
+
                     if (markers[id]) {
                         markers[id].setLatLng([lat, lng]);
+                        tags[id].setLatLng([lat, lng]);
                     } else {
-                        // Custom Marker
-                        const icon = L.divIcon({
-                            className: 'custom-div-icon',
-                            html: `<div style="background-color:${id === myName ? '#007bff' : '#ff4500'}; width:12px; height:12px; border:2px solid white; border-radius:50%; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>`,
-                            iconSize: [12, 12],
-                            iconAnchor: [6, 6]
+                        // Name Tag
+                        const labelIcon = L.divIcon({
+                            className: 'custom-tag',
+                            html: `<div class="name-tag">${id}</div>`,
+                            iconSize: [60, 20], iconAnchor: [30, 40]
                         });
-                        markers[id] = L.marker([lat, lng], {icon: icon}).addTo(map).bindPopup(id).openPopup();
+                        tags[id] = L.marker([lat, lng], {icon: labelIcon}).addTo(map);
+
+                        // Precision Dot
+                        const dotIcon = L.divIcon({
+                            className: 'dot',
+                            html: `<div style="background:${color}; width:16px; height:16px; border:3px solid #fff; border-radius:50%; box-shadow: 0 0 15px rgba(0,0,0,0.8);"></div>`,
+                            iconSize: [16, 16], iconAnchor: [8, 8]
+                        });
+
+                        markers[id] = L.marker([lat, lng], {icon: dotIcon}).addTo(map)
+                            .bindPopup(`<b>${id}</b><br>Precision Tracking Active`).openPopup();
                     }
                 }
             });
@@ -141,10 +144,7 @@
 
         window.panicStop = function() {
             if (watchId) navigator.geolocation.clearWatch(watchId);
-            remove(ref(db, `${secretPath}/${myName}`)).then(() => {
-                alert("Location Wiped and Securely Exited.");
-                location.reload();
-            });
+            remove(ref(db, `${secretPath}/${myName}`)).then(() => location.reload());
         };
     </script>
 </body>
